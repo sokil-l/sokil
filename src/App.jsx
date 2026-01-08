@@ -1235,7 +1235,7 @@ export default function App() {
                 className={mapMode === "project" ? "bg-amber-50 border-amber-200" : ""}
               >
                 <Layers className="w-4 h-4" />
-                {mapMode === "project" ? "КАРТА З ЖК" : "БАЗА"}
+                {mapMode === "project" ? "КАРТА З ЖК" : "КАРТА БЕЗ ЖК"}
               </SoftButton>
 
               {/* Admin controls */}
