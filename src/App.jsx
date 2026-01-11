@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { zones as PATH_ZONES } from "./zones.paths";
 import engMap from "./assets/eng.png";
-import { features as ENG_FEATURES } from "./engineering.paths"; 
+import { features as ENG_FEATURES } from "./engineering.paths";
+import { db } from "./firebase";
+import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 
 import {
   HardHat,
@@ -13,21 +15,14 @@ import {
   Search,
   Info,
   Move,
-  ZoomIn,
-  ZoomOut,
   X,
-  Undo2,
   AlertTriangle,
   Plus,
   Trash2,
   Copy,
   Settings,
   Table2,
-  SlidersHorizontal,
   FileJson,
-  Eye,
-  EyeOff,
-  Filter,
   CheckCircle2,
   Clock,
   Ban,
@@ -38,10 +33,12 @@ import {
 import baseMap from "./assets/base.png";
 import projectMap from "./assets/project.png";
 
-const LS_ZONES = "bap_zones_v4_fixed";
-const LS_ADMIN = "bap_admin_session_v4_fixed";
 const LS_SETTINGS = "bap_project_settings_v4_fixed";
+const LS_ADMIN = "bap_admin_session_v4_fixed";
 const LS_ENG = "bap_eng_v1";
+
+
+
 
 
 const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
@@ -183,6 +180,20 @@ function Card({ children, className = "" }) {
   );
 }
 
+function useDebouncedCallback(fn, delay = 300) {
+  const fnRef = useRef(fn);
+  useEffect(() => { fnRef.current = fn; }, [fn]);
+
+  const tRef = useRef(null);
+
+  return useMemo(() => {
+    return (...args) => {
+      if (tRef.current) clearTimeout(tRef.current);
+      tRef.current = setTimeout(() => fnRef.current(...args), delay);
+    };
+  }, [delay]);
+}
+
 function SoftButton({ children, onClick, className = "", disabled, title }) {
   return (
     <button
@@ -202,6 +213,12 @@ function SoftButton({ children, onClick, className = "", disabled, title }) {
     </button>
   );
 }
+
+async function saveSettings(next) {
+  const ref = doc(db, "settings", "main");
+  await setDoc(ref, next, { merge: true });
+}
+
 
 function PrimaryButton({ children, onClick, className = "", disabled, title }) {
   return (
@@ -667,12 +684,37 @@ function AdminTable({ zones, setSelectedId, updateZone, deleteZone, duplicateZon
   );
 }
 
-function AdminSettings({ settings, setSettings, resetData }) {
-  const [localStrings, setLocalStrings] = useState(() => ({ ...settings.strings }));
+
+function AdminSettings({ settings, setSettings, resetData, isAdmin }) {
+  const [draft, setDraft] = useState(() => settings);
 
   useEffect(() => {
-    setLocalStrings({ ...settings.strings });
-  }, [settings.strings]);
+    setDraft(settings);
+  }, [settings]);
+
+  const commitDebounced = useDebouncedCallback((next) => {
+    setSettings(next);
+    if (isAdmin) saveSettings(next).catch(console.error);
+  }, 300);
+
+  const setField = (key, value) => {
+    setDraft((prev) => {
+      const next = { ...prev, [key]: value };
+      commitDebounced(next);
+      return next;
+    });
+  };
+
+  const setStringField = (k, value) => {
+    setDraft((prev) => {
+      const next = {
+        ...prev,
+        strings: { ...DEFAULT_STRINGS, ...(prev.strings || {}), [k]: value },
+      };
+      commitDebounced(next);
+      return next;
+    });
+  };
 
   return (
     <div className="grid grid-cols-12 gap-4">
@@ -684,24 +726,24 @@ function AdminSettings({ settings, setSettings, resetData }) {
           <div className="mt-4 grid grid-cols-12 gap-2">
             <Field label="Назва проєкту" className="col-span-12">
               <input
-                value={settings.projectName}
-                onChange={(e) => setSettings((s) => ({ ...s, projectName: e.target.value }))}
+                value={draft.projectName || ""}
+                onChange={(e) => setField("projectName", e.target.value)}
                 className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white outline-none focus:ring-2 focus:ring-amber-200"
               />
             </Field>
 
             <Field label="Підзаголовок" className="col-span-12">
               <input
-                value={settings.projectSubtitle}
-                onChange={(e) => setSettings((s) => ({ ...s, projectSubtitle: e.target.value }))}
+                value={draft.projectSubtitle || ""}
+                onChange={(e) => setField("projectSubtitle", e.target.value)}
                 className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white outline-none focus:ring-2 focus:ring-amber-200"
               />
             </Field>
 
             <Field label="Пароль адміністратора" className="col-span-12 md:col-span-6">
               <input
-                value={settings.adminPassword}
-                onChange={(e) => setSettings((s) => ({ ...s, adminPassword: e.target.value }))}
+                value={draft.adminPassword || ""}
+                onChange={(e) => setField("adminPassword", e.target.value)}
                 className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white outline-none focus:ring-2 focus:ring-amber-200"
               />
             </Field>
@@ -738,19 +780,9 @@ function AdminSettings({ settings, setSettings, resetData }) {
               <React.Fragment key={key}>
                 <div className="col-span-3 text-xs text-slate-600 flex items-center">{key}</div>
                 <input
-                  className="col-span-9 px-3 py-2 rounded-xl border border-slate-200 bg-white outline-none focus:ring-2 focus:ring-amber-200"
-                  value={localStrings[key] ?? ""}
-                  onChange={(e) => setLocalStrings((ls) => ({ ...ls, [key]: e.target.value }))}
-                  onBlur={() => {
-                    setSettings((s) => ({
-                      ...s,
-                      strings: {
-                        ...s.strings,
-                        [key]: localStrings[key] || DEFAULT_STRINGS[key],
-                      },
-                    }));
-                  }}
-                  placeholder={DEFAULT_STRINGS[key]}
+                  className="col-span-9 w-full px-3 py-2 rounded-xl border border-slate-200 bg-white outline-none focus:ring-2 focus:ring-amber-200"
+                  value={(draft.strings || {})[key] ?? ""}
+                  onChange={(e) => setStringField(key, e.target.value)}
                 />
               </React.Fragment>
             ))}
@@ -761,57 +793,102 @@ function AdminSettings({ settings, setSettings, resetData }) {
   );
 }
 
-async function loadZonesFromPublicJson() {
-  const base = process.env.PUBLIC_URL || "";
-  const res = await fetch(`${base}/zones.json`, { cache: "no-store" });
-  if (!res.ok) throw new Error("Не удалось загрузить zones.json");
-  const data = await res.json();
-  return Array.isArray(data?.zones) ? data.zones : [];
-}
 
-function loadZonesFromLocalStorage() {
-  try {
-    const raw = localStorage.getItem("LS_ZONES_V3");
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
-async function resolveInitialZones(isAdmin) {
-  const publicZones = await loadZonesFromPublicJson();
-  if (!isAdmin) return publicZones;
-
-  const localZones = loadZonesFromLocalStorage();
-  return localZones ?? publicZones;
-}
 
 export default function App() {
- 
+    const [zones, setZones] = useState([]);
   const [settings, setSettings] = useState(() => {
     const saved = safeJsonParse(localStorage.getItem(LS_SETTINGS), null);
     return saved
       ? { ...DEFAULT_SETTINGS, ...saved, strings: { ...DEFAULT_STRINGS, ...(saved.strings || {}) } }
       : DEFAULT_SETTINGS;
   });
+  const [isAdmin, setIsAdmin] = useState(false);
+  
 
   useEffect(() => {
-    localStorage.setItem(LS_SETTINGS, JSON.stringify(settings));
-  }, [settings]);
+  (async () => {
+    const ref = doc(db, "zones", "main");
+    const snap = await getDoc(ref);
+    if (!snap.exists()) {
+      await setDoc(ref, { items: AUTO_ZONES });
+    }
+  })();
+}, []);
 
-  useEffect(() => {
-    const link = document.createElement("link");
-    link.rel = "stylesheet";
-    link.href =
-      "https://fonts.googleapis.com/css2?family=Oswald:wght@400;600&family=Montserrat:wght@400;500;600&display=swap";
-    document.head.appendChild(link);
-    return () => link.remove();
-  }, []);
+useEffect(() => {
+  (async () => {
+    const ref = doc(db, "settings", "main");
+    const snap = await getDoc(ref);
+    if (!snap.exists()) {
+      await setDoc(ref, DEFAULT_SETTINGS);
+    }
+  })();
+}, []);
 
-  const [imagesLoaded, setImagesLoaded] = useState(false);
- useEffect(() => {
+
+
+const hydratingRef = useRef(false);
+const settingsHydratedRef = useRef(false);
+
+const saveZonesDebounced = useDebouncedCallback((items) => {
+  saveZonesToFirestore(items).catch(console.error);
+}, 300);
+
+useEffect(() => {
+  if (!isAdmin) return;
+  saveZonesDebounced(zones);
+}, [zones, isAdmin, saveZonesDebounced]);
+
+useEffect(() => {
+  const ref = doc(db, "settings", "main");
+  const unsub = onSnapshot(ref, (snap) => {
+    if (!snap.exists()) return;
+    hydratingRef.current = true;
+    setSettings(prev => ({
+      ...prev,
+      ...snap.data(),
+      strings: { ...DEFAULT_STRINGS, ...(snap.data().strings || {}) },
+    }));
+    settingsHydratedRef.current = true;
+    queueMicrotask(() => { hydratingRef.current = false; });
+  });
+  return () => unsub();
+}, []);
+
+useEffect(() => {
+  if (!isAdmin) return;
+  if (!settingsHydratedRef.current) return;
+  if (hydratingRef.current) return;
+
+  saveSettings(settings).catch(console.error);
+}, [isAdmin, settings]);
+
+
+
+
+
+  
+  async function saveZonesToFirestore(nextZones, force = false) {
+  if (!force && !isAdmin) return;
+  const ref = doc(db, "zones", "main");
+  await setDoc(ref, { items: nextZones }, { merge: true });
+}
+
+
+useEffect(() => {
+  const ref = doc(db, "zones", "main");
+  const unsub = onSnapshot(ref, (snap) => {
+    if (!snap.exists()) return;
+    const data = snap.data();
+    if (Array.isArray(data.items)) setZones(data.items);
+  });
+  return () => unsub();
+}, []);
+
+const [imagesLoaded, setImagesLoaded] = useState(false);
+
+useEffect(() => {
   let loaded = 0;
   const b = new Image();
   const p = new Image();
@@ -822,32 +899,25 @@ export default function App() {
     if (loaded === 3) setImagesLoaded(true);
   };
 
+  b.onload = handleLoad; p.onload = handleLoad; e.onload = handleLoad;
+  b.onerror = handleLoad; p.onerror = handleLoad; e.onerror = handleLoad; // чтобы не зависло навсегда
+
   b.src = baseMap;
   p.src = projectMap;
   e.src = engMap;
-
-  b.onload = handleLoad;
-  p.onload = handleLoad;
-  e.onload = handleLoad;
 }, []);
 
 
-  const [isMapHovered, setIsMapHovered] = useState(false);
 
-  const [isAdmin, setIsAdmin] = useState(false);
+
+
+
   const [adminLoginOpen, setAdminLoginOpen] = useState(false);
   const [adminPassword, setAdminPassword] = useState("");
   const [adminPanel, setAdminPanel] = useState("details");
   
 
-  const [zones, setZones] = useState(() => {
-    const saved = safeJsonParse(localStorage.getItem(LS_ZONES), null);
-    return Array.isArray(saved) ? saved : AUTO_ZONES;
-  });
 
-  useEffect(() => {
-    localStorage.setItem(LS_ZONES, JSON.stringify(zones));
-  }, [zones]);
 
   useEffect(() => {
     const saved = safeJsonParse(localStorage.getItem(LS_ADMIN), null);
@@ -866,23 +936,6 @@ useEffect(() => {
 
   const [selectedId, setSelectedId] = useState(null);
 
-  useEffect(() => {
-    let alive = true;
-
-    (async () => {
-      try {
-        const z = await resolveInitialZones(isAdmin);
-        if (!alive) return;
-        setZones(z);
-      } catch (e) {
-        console.error(e);
-        setZones([]);
-      }
-    })();
-
-    return () => { alive = false; };
-  }, [isAdmin]);
-
 
 
   const [query, setQuery] = useState("");
@@ -892,9 +945,9 @@ useEffect(() => {
 
   const [mapMode, setMapMode] = useState("base");
 
-  const showProject = mapMode === "project" || (mapMode === "base" && isMapHovered);
-  const showBase = mapMode === "base" && !isMapHovered;
-  const showEng = mapMode === "eng";
+    const showBase = mapMode === "base";
+    const showProject = mapMode === "project";
+    const showEng = mapMode === "eng";
   
   const VIEW = mapMode === "eng"
   ? { w: 1151, h: 766 }
@@ -922,19 +975,6 @@ useEffect(() => {
 
   const fileInputRef = useRef(null);
 
-  const filteredZones = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    let list = zones;
-
-    if (!isAdmin) list = list.filter((z) => !!z.hasProject);
-    if (filterProjectOnly) list = list.filter((z) => !!z.hasProject);
-
-    if (!q) return list;
-    return list.filter((z) => {
-      const hay = `${z.id} ${z.name} ${z.status} ${z.type} ${z.area}`.toLowerCase();
-      return hay.includes(q);
-    });
-  }, [zones, query, filterProjectOnly, isAdmin]);
 
   const activeItems = mapMode === "eng" ? engItems : zones;
   const selected = useMemo(
@@ -946,10 +986,10 @@ const filteredItems = useMemo(() => {
   const q = query.trim().toLowerCase();
   let list = activeItems;
 
-  if (mapMode !== "eng") {
-    if (!isAdmin) list = list.filter((z) => !!z.hasProject);
-    if (filterProjectOnly) list = list.filter((z) => !!z.hasProject);
-  }
+  // if (mapMode !== "eng") {
+  //   if (!isAdmin) list = list.filter((z) => !!z.hasProject);
+  //   if (filterProjectOnly) list = list.filter((z) => !!z.hasProject);
+  // }
 
   if (!q) return list;
   return list.filter((z) => {
@@ -969,56 +1009,10 @@ const filteredItems = useMemo(() => {
   }, [zones]);
 
   function canClickZone(z) {
-    if (!z) return false;
-    if (mapMode == "eng") return true;
-    return isAdmin ? true : !!z.hasProject;
+    return true;
   }
 
-  function exportZonesJson(zones) {
-    const payload = {
-      version: 1,
-      updatedAt: new Date().toISOString(),
-      zones
-    };
 
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "zones.json";
-    a.click();
-
-    URL.revokeObjectURL(url);
-  }
-
-  function zoomIn() {
-    setScale((s) => clamp(s * 1.12, 0.6, 3.5));
-  }
-  function zoomOut() {
-    setScale((s) => clamp(s * 0.89, 0.6, 3.5));
-  }
-  function resetView() {
-    setScale(1);
-    setPan({ x: 0, y: 0 });
-  }
-
-  function zoomToZone(zone) {
-    if (!zone || !zone.rect) return;
-    const el = containerRef.current;
-    if (!el) return;
-
-    const newScale = 2.5;
-    const cx = parseFloat(zone.rect.x) + parseFloat(zone.rect.w) / 2;
-    const cy = parseFloat(zone.rect.y) + parseFloat(zone.rect.h) / 2; 
-
-    const { width, height } = el.getBoundingClientRect();
-    const newPanX = ((50 - cx) / 100) * width * newScale;
-    const newPanY = ((50 - cy) / 100) * height * newScale;
-
-    setScale(newScale);
-    setPan({ x: newPanX, y: newPanY });
-  }
 
   function onWheel(e) {
     e.preventDefault();
@@ -1035,11 +1029,6 @@ const filteredItems = useMemo(() => {
   if (zoneEl) {
     dragRef.current.moved = false;
     return;
-  }
-
-  if (isAdmin && e.altKey) {
-    const ok = createZoneFromVoidAt(e.clientX, e.clientY);
-    if (ok) return;
   }
 
   const el = containerRef.current;
@@ -1085,7 +1074,6 @@ const filteredItems = useMemo(() => {
     dragRef.current.dragging = false;
     dragRef.current.pid = null;
     setHover({ id: null, x: 0, y: 0 });
-    setIsMapHovered(false);
   }
 
   function loginAdmin() {
@@ -1106,115 +1094,138 @@ const filteredItems = useMemo(() => {
   }
 
   function updateZone(id, patch) {
-    setZones((prev) => prev.map((z) => (z.id === id ? { ...z, ...patch } : z)));
-  }
+  setZones((prev) =>
+    prev.map((z) => (z.id === id ? { ...z, ...patch } : z))
+  );
+}
+
 
   function createZoneTextOnly() {
-    let n = 1;
-    let id = `ZNEW${n}`;
-    const setIds = new Set(zones.map((z) => z.id));
-    while (setIds.has(id)) {
-      n += 1;
-      id = `ZNEW${n}`;
-    }
-
-    const z = {
-      id,
-      name: `Нова ділянка ${id}`,
-      status: "planned",
-      area: "",
-      type: "",
-      hasProject: true,
-      shape: "path",
-      d: "",
-      params: {},
-      project: { title: "", description: "", metrics: {} },
-    };
-
-    setZones((prev) => [z, ...prev]);
-    setSelectedId(id);
-    setModalOpen(true);
-    return id;
+  let n = 1;
+  let id = `ZNEW${n}`;
+  const setIds = new Set(zones.map((z) => z.id));
+  while (setIds.has(id)) {
+    n += 1;
+    id = `ZNEW${n}`;
   }
+
+  const z = {
+    id,
+    name: `Нова ділянка ${id}`,
+    status: "planned",
+    area: "",
+    type: "",
+    hasProject: true,
+    shape: "path",
+    d: "",
+    params: {},
+    project: { title: "", description: "", metrics: {} },
+  };
+
+  setZones((prev) => [...prev, z]);
+
+  setSelectedId(id);
+  setModalOpen(true);
+  return id;
+}
 
   function duplicateZone(id) {
-    const orig = zones.find((z) => z.id === id);
-    if (!orig) return;
+  const orig = zones.find((z) => z.id === id);
+  if (!orig) return;
 
-    let n = 1;
-    let newId = `${orig.id}_copy${n}`;
-    const setIds = new Set(zones.map((z) => z.id));
-    while (setIds.has(newId)) {
-      n += 1;
-      newId = `${orig.id}_copy${n}`;
-    }
-
-    const copy = { ...orig, id: newId, name: `${orig.name} (copy)` };
-    setZones((prev) => [copy, ...prev]);
-    setSelectedId(newId);
+  let n = 1;
+  let newId = `${orig.id}_copy${n}`;
+  const setIds = new Set(zones.map((z) => z.id));
+  while (setIds.has(newId)) {
+    n += 1;
+    newId = `${orig.id}_copy${n}`;
   }
+
+  const copy = { ...orig, id: newId, name: `${orig.name} (copy)` };
+  setZones((prev) => [...prev, copy]);
+
+  setSelectedId(newId);
+}
+
+
 
   function deleteZone(id) {
-    if (!confirm(`Видалити зону ${id}?`)) return;
-    setZones((prev) => prev.filter((z) => z.id !== id));
-    if (selectedId === id) {
-      setSelectedId(null);
-      setModalOpen(false);
-    }
+  if (!confirm(`Видалити зону ${id}?`)) return;
+
+  setZones((prev) => prev.filter((z) => z.id !== id));
+
+  if (selectedId === id) {
+    setSelectedId(null);
+    setModalOpen(false);
   }
+}
 
   function updateZoneParam(id, key, value) {
-    setZones((prev) =>
-      prev.map((z) => (z.id === id ? { ...z, params: { ...(z.params || {}), [key]: value } } : z)),
-    );
-  }
+  setZones((prev) =>
+    prev.map((z) => {
+      if (z.id !== id) return z;
+      const params = { ...(z.params || {}), [key]: value };
+      return { ...z, params };
+    })
+  );
+}
 
   function deleteZoneParam(id, key) {
-    setZones((prev) =>
-      prev.map((z) => {
-        if (z.id !== id) return z;
-        const p = { ...(z.params || {}) };
-        delete p[key];
-        return { ...z, params: p };
-      }),
-    );
-  }
+  setZones((prev) =>
+    prev.map((z) => {
+      if (z.id !== id) return z;
+      const params = { ...(z.params || {}) };
+      delete params[key];
+      return { ...z, params };
+    })
+  );
+}
 
-  function ensureProject(id) {
-    setZones((prev) =>
-      prev.map((z) => {
-        if (z.id !== id) return z;
-        if (z.project) return z;
-        return { ...z, project: { title: "", description: "", metrics: {} } };
-      }),
-    );
-  }
+
+
+
+ function ensureProject(id) {
+  setZones((prev) =>
+    prev.map((z) => {
+      if (z.id !== id) return z;
+      if (z.project) return z;
+      return { ...z, project: { title: "", description: "", metrics: {} } };
+    })
+  );
+}
+
 
   function removeProject(id) {
-    setZones((prev) => prev.map((z) => (z.id === id ? { ...z, project: null } : z)));
-  }
+  setZones((prev) =>
+    prev.map((z) => (z.id === id ? { ...z, project: null } : z))
+  );
+}
+
 
   function updateProjectMetric(id, key, value) {
-    setZones((prev) =>
-      prev.map((z) => {
-        if (z.id !== id) return z;
-        const proj = z.project || { title: "", description: "", metrics: {} };
-        return { ...z, project: { ...proj, metrics: { ...(proj.metrics || {}), [key]: value } } };
-      }),
-    );
-  }
+  setZones((prev) =>
+    prev.map((z) => {
+      if (z.id !== id) return z;
+      const project = z.project || { title: "", description: "", metrics: {} };
+      const metrics = { ...(project.metrics || {}), [key]: value };
+      return { ...z, project: { ...project, metrics } };
+    })
+  );
+}
+
 
   function deleteProjectMetric(id, key) {
-    setZones((prev) =>
-      prev.map((z) => {
-        if (z.id !== id) return z;
-        if (!z.project) return z;
-        const m = { ...(z.project.metrics || {}) };
-        delete m[key];
-        return { ...z, project: { ...z.project, metrics: m } };
-      }),
-    );
-  }
+  setZones((prev) =>
+    prev.map((z) => {
+      if (z.id !== id) return z;
+      const project = z.project || { title: "", description: "", metrics: {} };
+      const metrics = { ...(project.metrics || {}) };
+      delete metrics[key];
+      return { ...z, project: { ...project, metrics } };
+    })
+  );
+}
+
 
   function exportAll() {
     downloadJson("build-area.export.json", { settings, zones });
@@ -1259,8 +1270,9 @@ const filteredItems = useMemo(() => {
   }
 
   function resetData() {
-    if (!confirm("Скинути всі дані зон до PRESET? Поточні зміни буде втрачено.")) return;
+    if (!confirm("Скинути всі дані зон? Поточні зміни буде втрачено.")) return;
     setZones(AUTO_ZONES);
+    saveZonesToFirestore(AUTO_ZONES, true);
     setSelectedId(null);
     setModalOpen(false);
   }
@@ -1277,284 +1289,9 @@ const filteredItems = useMemo(() => {
     };
   }
 
-  function clientToSvgPoint(clientX, clientY) {
-  const svg = svgRef.current;
-  if (!svg) return null;
-  const pt = svg.createSVGPoint();
-  pt.x = clientX;
-  pt.y = clientY;
-  const ctm = svg.getScreenCTM();
-  if (!ctm) return null;
-  const inv = ctm.inverse();
-  const sp = pt.matrixTransform(inv);
-  return { x: sp.x, y: sp.y };
-}
 
-function nextVoidId(existing) {
-  let n = 1;
-  while (existing.has(`ZVOID${String(n).padStart(2, "0")}`)) n++;
-  return `ZVOID${String(n).padStart(2, "0")}`;
-}
 
-function buildOccupiedMaskFromZones(w, h, zonesList) {
-  const canvas = document.createElement("canvas");
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext("2d", { willReadFrequently: true });
-  ctx.clearRect(0, 0, w, h);
 
-  ctx.fillStyle = "#fff";
-
-  for (const z of zonesList) {
-    if (!z?.d) continue;
-    if (z.shape === "line") continue;
-
-    try {
-      const p = new Path2D(z.d);
-      ctx.fill(p);
-    } catch {
-    }
-  }
-
-  const img = ctx.getImageData(0, 0, w, h).data;
-  const occ = new Uint8Array(w * h);
-  for (let i = 0, px = 0; i < img.length; i += 4, px++) {
-    occ[px] = img[i + 3] > 0 ? 1 : 0;
-  }
-  return { occ, w, h };
-}
-
-function floodFillVoid(occ, w, h, sx, sy) {
-  const ix = Math.floor(sx);
-  const iy = Math.floor(sy);
-  if (ix < 0 || iy < 0 || ix >= w || iy >= h) return null;
-
-  const idx0 = iy * w + ix;
-  if (occ[idx0] === 1) return null;
-
-  const visited = new Uint8Array(w * h);
-  const qx = new Int32Array(w * h);
-  const qy = new Int32Array(w * h);
-  let qh = 0, qt = 0;
-
-  visited[idx0] = 1;
-  qx[qt] = ix; qy[qt] = iy; qt++;
-
-  let minX = ix, maxX = ix, minY = iy, maxY = iy;
-
-  const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
-
-  while (qh < qt) {
-    const x = qx[qh];
-    const y = qy[qh];
-    qh++;
-
-    if (x < minX) minX = x;
-    if (x > maxX) maxX = x;
-    if (y < minY) minY = y;
-    if (y > maxY) maxY = y;
-
-    for (const [dx, dy] of dirs) {
-      const nx = x + dx;
-      const ny = y + dy;
-      if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
-      const ni = ny * w + nx;
-      if (visited[ni]) continue;
-      if (occ[ni] === 1) continue;
-      visited[ni] = 1;
-      qx[qt] = nx; qy[qt] = ny; qt++;
-    }
-  }
-
-  return { visited, minX, maxX, minY, maxY };
-}
-
-function marchingSquares(visited, w, h, bb) {
-  const { minX, maxX, minY, maxY } = bb;
-
-  const x0 = Math.max(minX - 1, 0);
-  const x1 = Math.min(maxX + 1, w - 2);
-  const y0 = Math.max(minY - 1, 0);
-  const y1 = Math.min(maxY + 1, h - 2);
-
-  const inside = (x, y) => visited[y * w + x] === 1;
-
-  const segments = [];
-
-  for (let y = y0; y <= y1; y++) {
-    for (let x = x0; x <= x1; x++) {
-      const a = inside(x, y) ? 1 : 0;
-      const b = inside(x + 1, y) ? 1 : 0;
-      const c = inside(x + 1, y + 1) ? 1 : 0;
-      const d = inside(x, y + 1) ? 1 : 0;
-      const code = (a << 3) | (b << 2) | (c << 1) | d;
-
-      const top = [x + 0.5, y];
-      const right = [x + 1, y + 0.5];
-      const bottom = [x + 0.5, y + 1];
-      const left = [x, y + 0.5];
-
-      switch (code) {
-        case 0:
-        case 15:
-          break;
-        case 1:
-        case 14:
-          segments.push([...left, ...bottom]);
-          break;
-        case 2:
-        case 13:
-          segments.push([...bottom, ...right]);
-          break;
-        case 3:
-        case 12:
-          segments.push([...left, ...right]);
-          break;
-        case 4:
-        case 11:
-          segments.push([...top, ...right]);
-          break;
-        case 5:
-          segments.push([...top, ...left]);
-          segments.push([...bottom, ...right]);
-          break;
-        case 6:
-        case 9:
-          segments.push([...top, ...bottom]);
-          break;
-        case 7:
-        case 8:
-          segments.push([...top, ...left]);
-          break;
-        case 10:
-          segments.push([...top, ...right]);
-          segments.push([...bottom, ...left]);
-          break;
-        default:
-          break;
-      }
-    }
-  }
-
-  if (!segments.length) return null;
-
-  const key = (x, y) => `${x.toFixed(3)},${y.toFixed(3)}`;
-  const map = new Map();
-  for (const s of segments) {
-    const k1 = key(s[0], s[1]);
-    if (!map.has(k1)) map.set(k1, []);
-    map.get(k1).push(s);
-  }
-
-  const first = segments[0];
-  let cx = first[2], cy = first[3];
-  const poly = [[first[0], first[1]], [first[2], first[3]]];
-
-  const used = new Set();
-  used.add(first);
-
-  for (let guard = 0; guard < 200000; guard++) {
-    const k = key(cx, cy);
-    const arr = map.get(k);
-    if (!arr || !arr.length) break;
-
-    let next = null;
-    for (const s of arr) {
-      if (used.has(s)) continue;
-      next = s;
-      break;
-    }
-    if (!next) break;
-
-    used.add(next);
-    cx = next[2]; cy = next[3];
-    poly.push([cx, cy]);
-
-    const [sx, sy] = poly[0];
-    if (Math.abs(cx - sx) < 1e-3 && Math.abs(cy - sy) < 1e-3) break;
-  }
-
-  const simplified = [];
-  for (let i = 0; i < poly.length; i++) {
-    const p = poly[i];
-    const prev = simplified[simplified.length - 1];
-    if (!prev || Math.hypot(p[0] - prev[0], p[1] - prev[1]) > 0.3) simplified.push(p);
-  }
-
-  if (simplified.length < 10) return null;
-  return simplified;
-}
-
-function polyToSvgPath(poly, scaleX, scaleY) {
-  const pts = poly.map(([x, y]) => [x * scaleX, y * scaleY]);
-  let d = `M${pts[0][0].toFixed(2)} ${pts[0][1].toFixed(2)}`;
-  for (let i = 1; i < pts.length; i++) {
-    d += `L${pts[i][0].toFixed(2)} ${pts[i][1].toFixed(2)}`;
-  }
-  d += "Z";
-  return d;
-}
-
-function createZoneFromVoidAt(clientX, clientY) {
-  if (!isAdmin) return false;
-  if (mapMode === "eng") return false;
-
-  const svgPt = clientToSvgPoint(clientX, clientY);
-  if (!svgPt) return false;
-
-  const MASK_W = 420;
-  const MASK_H = Math.round((MASK_W * VIEW.h) / VIEW.w);
-
-  const sx = MASK_W / VIEW.w;
-  const sy = MASK_H / VIEW.h;
-
-  const seedX = svgPt.x * sx;
-  const seedY = svgPt.y * sy;
-
-  const { occ, w, h } = buildOccupiedMaskFromZones(MASK_W, MASK_H, zones);
-
-  const filled = floodFillVoid(occ, w, h, seedX, seedY);
-  if (!filled) {
-    alert("Тут не пустота (або занадто малий зазор).");
-    return false;
-  }
-
- 
-  const area = (() => {
-    const bw = (filled.maxX - filled.minX + 1);
-    const bh = (filled.maxY - filled.minY + 1);
-    return bw * bh;
-  })();
-
-  const poly = marchingSquares(filled.visited, w, h, filled);
-  if (!poly) {
-    alert("Не вдалося побудувати контур пустоти.");
-    return false;
-  }
-
-  const d = polyToSvgPath(poly, VIEW.w / MASK_W, VIEW.h / MASK_H);
-
-  const existingIds = new Set(zones.map((z) => z.id));
-  const id = nextVoidId(existingIds);
-
-  const newZone = {
-    id,
-    name: `Void ${id}`,
-    status: "план",
-    area: "",
-    type: "",
-    hasProject: true,
-    shape: "path",
-    d,
-    params: {},
-    project: { title: "", description: "", metrics: {} },
-  };
-
-  setZones((prev) => [newZone, ...prev]);
-  setSelectedId(id);
-  setModalOpen(true);
-  return true;
-}
 
 
 
@@ -1859,8 +1596,6 @@ function createZoneFromVoidAt(clientX, clientY) {
     onPointerLeave={onPointerLeaveContainer}
     className="relative w-full overflow-hidden rounded-2xl border border-slate-200 bg-white select-none cursor-grab"
     style={{ touchAction: "none", aspectRatio: mapMode === "eng" ? "1151/766" : "1280/844" }}
-    onMouseEnter={() => setIsMapHovered(true)}
-    onMouseLeave={() => setIsMapHovered(false)}
   >
     <div
       className="absolute inset-0"
@@ -1912,7 +1647,7 @@ function createZoneFromVoidAt(clientX, clientY) {
           if (onlyProjectContours && !z.hasProject && !isAdmin) return null;
           const isLine = z.shape === "line";
           const isPath = z.shape === "path";
-          if((isPath && isLine) || !z.d) return null;
+          if ((!isPath && !isLine) || !z.d) return null;
 
           const clickable = canClickZone(z);
           const isSel = selectedId === z.id;
@@ -2083,7 +1818,7 @@ return (
                       ) : null}
 
                       {adminPanel === "settings" ? (
-                        <AdminSettings settings={settings} setSettings={setSettings} resetData={resetData} />
+                       <AdminSettings settings={settings} setSettings={setSettings} resetData={resetData} isAdmin={isAdmin} />
                       ) : null}
                     </div>
                   </Card>
