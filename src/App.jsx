@@ -131,7 +131,7 @@ const DEFAULT_STRINGS = {
 };
 
 const DEFAULT_SETTINGS = {
-  projectName: 'Забудова "Сокіл"',
+  projectName: 'Сокіл-л',
   projectSubtitle: "Інтерактивна мапа території",
   adminPassword: "admin999",
   strings: DEFAULT_STRINGS,
@@ -694,7 +694,6 @@ function AdminSettings({ settings, setSettings, resetData, isAdmin }) {
 
   const commitDebounced = useDebouncedCallback((next) => {
     setSettings(next);
-    if (isAdmin) saveSettings(next).catch(console.error);
   }, 300);
 
   const setField = (key, value) => {
@@ -830,6 +829,9 @@ useEffect(() => {
 
 const hydratingRef = useRef(false);
 const settingsHydratedRef = useRef(false);
+const zonesHydratingRef = useRef(false);
+const zonesHydratedRef = useRef(false);
+
 
 const saveZonesDebounced = useDebouncedCallback((items) => {
   saveZonesToFirestore(items).catch(console.error);
@@ -881,10 +883,16 @@ useEffect(() => {
   const unsub = onSnapshot(ref, (snap) => {
     if (!snap.exists()) return;
     const data = snap.data();
-    if (Array.isArray(data.items)) setZones(data.items);
+    if (!Array.isArray(data.items)) return;
+
+    zonesHydratingRef.current = true;
+    setZones(data.items);
+    zonesHydratedRef.current = true;
+    queueMicrotask(() => { zonesHydratingRef.current = false; });
   });
   return () => unsub();
 }, []);
+
 
 const [imagesLoaded, setImagesLoaded] = useState(false);
 
@@ -900,7 +908,7 @@ useEffect(() => {
   };
 
   b.onload = handleLoad; p.onload = handleLoad; e.onload = handleLoad;
-  b.onerror = handleLoad; p.onerror = handleLoad; e.onerror = handleLoad; // чтобы не зависло навсегда
+  b.onerror = handleLoad; p.onerror = handleLoad; e.onerror = handleLoad;
 
   b.src = baseMap;
   p.src = projectMap;
@@ -1605,44 +1613,54 @@ const filteredItems = useMemo(() => {
         willChange: "transform",
       }}
     >
-      {!imagesLoaded ? (
-        <div className="absolute inset-0 flex items-center justify-center">
-          <span className="text-sm text-slate-500">Завантаження карти…</span>
-        </div>
-      ) : (
-        <>
-          <img
-  src={baseMap}
-  className="absolute inset-0 w-full h-full object-contain pointer-events-none"
-  draggable={false}
-  style={{ opacity: showBase ? 1 : 0, transition: "opacity 0.25s ease" }}
-/>
-
-<img
-  src={projectMap}
-  className="absolute inset-0 w-full h-full object-contain pointer-events-none"
-  draggable={false}
-  style={{ opacity: showProject ? 1 : 0, transition: "opacity 0.25s ease" }}
-/>
-
-<img
-  src={engMap}
-  className="absolute inset-0 w-full h-full object-contain pointer-events-none"
-  draggable={false}
-  style={{ opacity: showEng ? 1 : 0, transition: "opacity 0.25s ease" }}
-/>
-
-
-        </>
-      )}
+      
+      {!imagesLoaded && (
+  <div className="absolute inset-0 z-20 flex items-center justify-center">
+    <div className="rounded-2xl bg-white/90 border border-slate-200 px-4 py-2 text-sm text-slate-700 shadow-sm">
+      Завантаження карти…
+    </div>
+  </div>
+)}
 
       <svg
-        ref={svgRef}
-        className="absolute inset-0"
-        viewBox={`0 0 ${VIEW.w} ${VIEW.h}`}
-        preserveAspectRatio="xMidYMid meet"
-        style={{ width: "100%", height: "100%" }}
-      >
+  ref={svgRef}
+  className="absolute inset-0"
+  viewBox={`0 0 ${VIEW.w} ${VIEW.h}`}
+  preserveAspectRatio="xMidYMid meet"
+  style={{ width: "100%", height: "100%" }}
+>
+  {/* карта внутри SVG */}
+  {mapMode === "base" ? (
+    <image
+      href={baseMap}
+      x="0"
+      y="0"
+      width={VIEW.w}
+      height={VIEW.h}
+      preserveAspectRatio="xMidYMid meet"
+      style={{ pointerEvents: "none" }}
+    />
+  ) : mapMode === "project" ? (
+    <image
+      href={projectMap}
+      x="0"
+      y="0"
+      width={VIEW.w}
+      height={VIEW.h}
+      preserveAspectRatio="xMidYMid meet"
+      style={{ pointerEvents: "none" }}
+    />
+  ) : (
+    <image
+      href={engMap}
+      x="0"
+      y="0"
+      width={VIEW.w}
+      height={VIEW.h}
+      preserveAspectRatio="xMidYMid meet"
+      style={{ pointerEvents: "none" }}
+    />
+  )}
         {activeItems.map((z) => {
           if (onlyProjectContours && !z.hasProject && !isAdmin) return null;
           const isLine = z.shape === "line";
