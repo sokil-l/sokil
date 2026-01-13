@@ -15,6 +15,7 @@ import {
   Search,
   Info,
   Move,
+  Undo2,
   X,
   AlertTriangle,
   Plus,
@@ -135,6 +136,12 @@ const DEFAULT_SETTINGS = {
   projectSubtitle: "Інтерактивна мапа території",
   adminPassword: "admin999",
   strings: DEFAULT_STRINGS,
+};
+
+const MAP_CAL = {
+  base:   { x: -10, y: -15, s: 1 },
+  project:{ x: 0, y: 0, s: 1 },
+  eng:    { x: 0, y: 0, s: 1 },
 };
 
 const AUTO_ZONES = Array.isArray(PATH_ZONES)
@@ -299,44 +306,93 @@ function RectTiny({ value, onChange }) {
 
 function AdminDetails({
   selected,
-  mapMode,
+  onSaveSelected,
   createZone,
   duplicateZone,
   deleteZone,
-  updateZone,
-  updateZoneParam,
-  deleteZoneParam,
-  ensureProject,
-  removeProject,
-  updateProjectMetric,
-  deleteProjectMetric,
 }) {
   const [newParamK, setNewParamK] = useState("");
   const [newParamV, setNewParamV] = useState("");
   const [newMetricK, setNewMetricK] = useState("");
   const [newMetricV, setNewMetricV] = useState("");
 
+  const [draft, setDraft] = useState(null);
+
+  const deepClone = (obj) => JSON.parse(JSON.stringify(obj));
+
+  useEffect(() => {
+    setDraft(selected ? deepClone(selected) : null);
+  }, [selected?.id]);
+
   if (!selected) {
     return (
       <div className="text-sm text-slate-600">
         Виберіть зону, щоб редагувати її дані.
         <div className="mt-3 flex gap-2">
-          <button
-            onClick={() => createZone()}
-            className="px-3 py-2 rounded-xl bg-amber-500 text-white border border-amber-500 hover:bg-amber-600 transition flex items-center gap-2"
+          <PrimaryButton
+            onClick={() => createZone?.()}
+            title="Додати текст"
           >
             <Plus className="w-4 h-4" />
             Додати текст
-          </button>
+          </PrimaryButton>
         </div>
       </div>
     );
   }
 
-  const m = statusMeta(selected.status);
+  const isDirty = draft && JSON.stringify(draft) !== JSON.stringify(selected);
+
+  const toggleProject = () => {
+    setDraft((d) => {
+      if (!d) return d;
+      if (d.project) return { ...d, project: null };
+      return { ...d, project: { title: "", description: "", metrics: {} } };
+    });
+  };
+
+  const setParam = (k, v) => {
+    setDraft((d) => ({
+      ...d,
+      params: { ...(d?.params || {}), [k]: v },
+    }));
+  };
+
+  const deleteParam = (k) => {
+    setDraft((d) => {
+      const next = { ...(d?.params || {}) };
+      delete next[k];
+      return { ...d, params: next };
+    });
+  };
+
+  const setMetric = (k, v) => {
+    setDraft((d) => ({
+      ...d,
+      project: {
+        ...(d?.project || { title: "", description: "", metrics: {} }),
+        metrics: { ...((d?.project?.metrics) || {}), [k]: v },
+      },
+    }));
+  };
+
+  const deleteMetric = (k) => {
+    setDraft((d) => {
+      const metrics = { ...((d?.project?.metrics) || {}) };
+      delete metrics[k];
+      return {
+        ...d,
+        project: {
+          ...(d?.project || { title: "", description: "", metrics: {} }),
+          metrics,
+        },
+      };
+    });
+  };
+
+  const m = statusMeta(draft?.status);
   const IconCmp = m.icon;
 
- 
   return (
     <div className="grid grid-cols-12 gap-4">
       <div className="col-span-12 md:col-span-5">
@@ -350,61 +406,79 @@ function AdminDetails({
         <div className="mt-3 grid grid-cols-12 gap-2">
           <Field label="Назва" className="col-span-12">
             <input
-              value={selected.name || ""}
-              onChange={(e) => updateZone(selected.id, { name: e.target.value })}
+              value={draft?.name || ""}
+              onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
               className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white outline-none focus:ring-2 focus:ring-amber-200"
             />
           </Field>
 
           <Field label="Статус" className="col-span-6">
             <input
-              value={selected.status || ""}
-              onChange={(e) => updateZone(selected.id, { status: e.target.value })}
+              value={draft?.status || ""}
+              onChange={(e) => setDraft((d) => ({ ...d, status: e.target.value }))}
               className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white outline-none focus:ring-2 focus:ring-amber-200"
             />
           </Field>
 
           <Field label="Площа" className="col-span-6">
             <input
-              value={selected.area || ""}
-              onChange={(e) => updateZone(selected.id, { area: e.target.value })}
+              value={draft?.area || ""}
+              onChange={(e) => setDraft((d) => ({ ...d, area: e.target.value }))}
               className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white outline-none focus:ring-2 focus:ring-amber-200"
             />
           </Field>
 
           <Field label="Тип" className="col-span-12">
             <input
-              value={selected.type || ""}
-              onChange={(e) => updateZone(selected.id, { type: e.target.value })}
+              value={draft?.type || ""}
+              onChange={(e) => setDraft((d) => ({ ...d, type: e.target.value }))}
               className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white outline-none focus:ring-2 focus:ring-amber-200"
             />
           </Field>
 
           <div className="col-span-12 flex flex-wrap gap-2">
             <button
-              onClick={() => updateZone(selected.id, { hasProject: !selected.hasProject })}
+              onClick={() => setDraft((d) => ({ ...d, hasProject: !d?.hasProject }))}
               className={
                 "px-3 py-2 rounded-xl border text-sm transition flex items-center gap-2 " +
-                (selected.hasProject
+                (draft?.hasProject
                   ? "bg-amber-500 text-white border-amber-500 hover:bg-amber-600"
                   : "bg-white border-slate-200 text-slate-800 hover:bg-slate-50")
               }
               title="Чи є зона ЖК?"
             >
               <Layers className="w-4 h-4" />
-              Чи це ЖК?: {selected.hasProject ? "ТАК" : "НІ"}
+              Чи це ЖК?: {draft?.hasProject ? "ТАК" : "НІ"}
             </button>
 
-            <button
-              onClick={() => duplicateZone(selected.id)}
-              className="px-3 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 transition text-sm flex items-center gap-2"
+            <PrimaryButton
+              onClick={() => draft && onSaveSelected(draft)}
+              disabled={!isDirty}
+              title="Зберегти зміни"
+            >
+              <CheckCircle2 className="w-4 h-4" />
+              Зберегти
+            </PrimaryButton>
+
+            <SoftButton
+              onClick={() => setDraft(deepClone(selected))}
+              disabled={!isDirty}
+              title="Скасувати (повернути як було)"
+            >
+              <Undo2 className="w-4 h-4" />
+              Скасувати
+            </SoftButton>
+
+            <SoftButton
+              onClick={() => duplicateZone?.(selected.id)}
+              title="Клонувати"
             >
               <Copy className="w-4 h-4" />
               Клонувати
-            </button>
+            </SoftButton>
 
             <button
-              onClick={() => deleteZone(selected.id)}
+              onClick={() => deleteZone?.(selected.id)}
               className="px-3 py-2 rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100 transition text-sm text-rose-700 flex items-center gap-2"
             >
               <Trash2 className="w-4 h-4" />
@@ -421,18 +495,18 @@ function AdminDetails({
           </div>
 
           <div className="mt-2 space-y-2">
-            {Object.entries(selected.params || {}).map(([k, v]) => (
+            {Object.entries(draft?.params || {}).map(([k, v]) => (
               <div key={k} className="grid grid-cols-12 gap-2 items-center">
                 <div className="col-span-5 text-xs text-slate-600 border border-slate-200 bg-slate-50 rounded-xl px-3 py-2 break-all">
                   {k}
                 </div>
                 <input
                   value={String(v)}
-                  onChange={(e) => updateZoneParam(selected.id, k, e.target.value)}
+                  onChange={(e) => setParam(k, e.target.value)}
                   className="col-span-6 px-3 py-2 rounded-xl border border-slate-200 bg-white outline-none focus:ring-2 focus:ring-amber-200 break-all"
                 />
                 <button
-                  onClick={() => deleteZoneParam(selected.id, k)}
+                  onClick={() => deleteParam(k)}
                   className="col-span-1 px-3 py-2 rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100 transition text-rose-700"
                   title="Видалити"
                 >
@@ -459,7 +533,7 @@ function AdminDetails({
               onClick={() => {
                 const k = newParamK.trim();
                 if (!k) return;
-                updateZoneParam(selected.id, k, newParamV);
+                setParam(k, newParamV);
                 setNewParamK("");
                 setNewParamV("");
               }}
@@ -475,27 +549,21 @@ function AdminDetails({
           <div className="flex items-center justify-between">
             <div className="font-semibold text-sm">Проєктні дані</div>
             <div className="flex gap-2">
-              {!selected.project ? (
-                <button
-                  onClick={() => ensureProject(selected.id)}
-                  className="px-3 py-2 rounded-xl bg-amber-500 text-white border border-amber-500 hover:bg-amber-600 transition text-sm flex items-center gap-2"
-                >
-                  <Plus className="w-4 h-4" />
-                  Створити проєкт
-                </button>
-              ) : (
-                <button
-                  onClick={() => removeProject(selected.id)}
-                  className="px-3 py-2 rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100 transition text-sm text-rose-700 flex items-center gap-2"
-                >
-                  <Trash2 className="w-4 h-4" />
-                  Видалити проєкт
-                </button>
-              )}
+              <SoftButton onClick={toggleProject} title="Створити/видалити проєкт">
+                {draft?.project ? (
+                  <>
+                    <Trash2 className="w-4 h-4" /> Видалити проєкт
+                  </>
+                ) : (
+                  <>
+                    <Plus className="w-4 h-4" /> Створити проєкт
+                  </>
+                )}
+              </SoftButton>
             </div>
           </div>
 
-          {!selected.project ? (
+          {!draft?.project ? (
             <div className="mt-2 text-sm text-slate-600">
               Немає проєктних даних. Якщо ділянка входить до ЖК — натисни <b>Створити&nbsp;проєкт</b>.
             </div>
@@ -504,11 +572,12 @@ function AdminDetails({
               <div className="mt-3 grid grid-cols-12 gap-2">
                 <Field label="Назва проєкту" className="col-span-12 md:col-span-6">
                   <input
-                    value={selected.project.title || ""}
+                    value={draft.project.title || ""}
                     onChange={(e) =>
-                      updateZone(selected.id, {
-                        project: { ...selected.project, title: e.target.value },
-                      })
+                      setDraft((d) => ({
+                        ...d,
+                        project: { ...(d.project || {}), title: e.target.value },
+                      }))
                     }
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white outline-none focus:ring-2 focus:ring-amber-200"
                   />
@@ -516,11 +585,12 @@ function AdminDetails({
 
                 <Field label="Опис проєкту" className="col-span-12 md:col-span-6">
                   <input
-                    value={selected.project.description || ""}
+                    value={draft.project.description || ""}
                     onChange={(e) =>
-                      updateZone(selected.id, {
-                        project: { ...selected.project, description: e.target.value },
-                      })
+                      setDraft((d) => ({
+                        ...d,
+                        project: { ...(d.project || {}), description: e.target.value },
+                      }))
                     }
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white outline-none focus:ring-2 focus:ring-amber-200"
                   />
@@ -530,18 +600,18 @@ function AdminDetails({
               <div className="mt-3 text-sm font-semibold">Показники</div>
 
               <div className="mt-2 space-y-2">
-                {Object.entries(selected.project.metrics || {}).map(([k, v]) => (
+                {Object.entries(draft.project.metrics || {}).map(([k, v]) => (
                   <div key={k} className="grid grid-cols-12 gap-2 items-center">
                     <div className="col-span-5 text-xs text-slate-600 border border-slate-200 bg-slate-50 rounded-xl px-3 py-2 break-all">
                       {k}
                     </div>
                     <input
                       value={String(v)}
-                      onChange={(e) => updateProjectMetric(selected.id, k, e.target.value)}
+                      onChange={(e) => setMetric(k, e.target.value)}
                       className="col-span-6 px-3 py-2 rounded-xl border border-slate-200 bg-white outline-none focus:ring-2 focus:ring-amber-200 break-all"
                     />
                     <button
-                      onClick={() => deleteProjectMetric(selected.id, k)}
+                      onClick={() => deleteMetric(k)}
                       className="col-span-1 px-3 py-2 rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100 transition text-rose-700"
                       title="Видалити"
                     >
@@ -568,7 +638,7 @@ function AdminDetails({
                   onClick={() => {
                     const k = newMetricK.trim();
                     if (!k) return;
-                    updateProjectMetric(selected.id, k, newMetricV);
+                    setMetric(k, newMetricV);
                     setNewMetricK("");
                     setNewMetricV("");
                   }}
@@ -586,11 +656,63 @@ function AdminDetails({
   );
 }
 
-function AdminTable({ zones, setSelectedId, updateZone, deleteZone, duplicateZone }) {
+
+function AdminTable({ zones, onSelect, onSaveAll, deleteZone, duplicateZone }) {
+  const [draftRows, setDraftRows] = useState(() => JSON.parse(JSON.stringify(zones || [])));
+  const [dirty, setDirty] = useState(false);
+
+  useEffect(() => {
+    setDraftRows(JSON.parse(JSON.stringify(zones || [])));
+    setDirty(false);
+  }, [zones]);
+
+  const patch = (id, patchObj) => {
+    setDraftRows((prev) =>
+      prev.map((z) => (z.id === id ? { ...z, ...patchObj } : z))
+    );
+    setDirty(true);
+  };
+
+  const patchRect = (id, rectPatch) => {
+    setDraftRows((prev) =>
+      prev.map((z) => {
+        if (z.id !== id) return z;
+        const rect = { ...(z.rect || { x: 0, y: 0, w: 0, h: 0 }), ...rectPatch };
+        return { ...z, rect, shape: "rect" };
+      })
+    );
+    setDirty(true);
+  };
+
   return (
     <div className="overflow-auto">
-      <div className="text-sm text-slate-600 mb-2">
-        Табличне редагування: змінюй поля, rect (% координати) та hasProject.
+      <div className="flex items-center justify-between gap-2 mb-3">
+        <div className="text-sm text-slate-600">
+          Табличне редагування (без лагів): змінюєш → потім <b>Зберегти все</b>.
+        </div>
+
+        <div className="flex gap-2">
+          <PrimaryButton
+            onClick={() => onSaveAll?.(draftRows)}
+            disabled={!dirty}
+            title="Зберегти всі зміни"
+          >
+            <CheckCircle2 className="w-4 h-4" />
+            Зберегти все
+          </PrimaryButton>
+
+          <SoftButton
+            onClick={() => {
+              setDraftRows(JSON.parse(JSON.stringify(zones || [])));
+              setDirty(false);
+            }}
+            disabled={!dirty}
+            title="Скасувати всі зміни"
+          >
+            <Undo2 className="w-4 h-4" />
+            Скасувати
+          </SoftButton>
+        </div>
       </div>
 
       <div className="min-w-[1000px] rounded-xl border border-slate-200 bg-white overflow-hidden">
@@ -604,11 +726,11 @@ function AdminTable({ zones, setSelectedId, updateZone, deleteZone, duplicateZon
           <div className="col-span-1 px-3 py-2 text-right">Дії</div>
         </div>
 
-        {zones.map((z) => (
+        {draftRows.map((z) => (
           <div key={z.id} className="grid grid-cols-12 border-b border-slate-100 text-sm">
             <button
               className="col-span-1 px-3 py-2 text-left font-semibold text-slate-900 hover:underline"
-              onClick={() => setSelectedId(z.id)}
+              onClick={() => onSelect?.(z.id)}
               title="Вибрати ділянку"
             >
               {z.id}
@@ -617,7 +739,7 @@ function AdminTable({ zones, setSelectedId, updateZone, deleteZone, duplicateZon
             <div className="col-span-3 px-3 py-2">
               <input
                 value={z.name || ""}
-                onChange={(e) => updateZone(z.id, { name: e.target.value })}
+                onChange={(e) => patch(z.id, { name: e.target.value })}
                 className="w-full px-2 py-1 rounded-lg border border-slate-200 bg-white outline-none focus:ring-2 focus:ring-amber-200"
               />
             </div>
@@ -625,7 +747,7 @@ function AdminTable({ zones, setSelectedId, updateZone, deleteZone, duplicateZon
             <div className="col-span-2 px-3 py-2">
               <input
                 value={z.status || ""}
-                onChange={(e) => updateZone(z.id, { status: e.target.value })}
+                onChange={(e) => patch(z.id, { status: e.target.value })}
                 className="w-full px-2 py-1 rounded-lg border border-slate-200 bg-white outline-none focus:ring-2 focus:ring-amber-200"
               />
             </div>
@@ -633,7 +755,7 @@ function AdminTable({ zones, setSelectedId, updateZone, deleteZone, duplicateZon
             <div className="col-span-2 px-3 py-2">
               <input
                 value={z.type || ""}
-                onChange={(e) => updateZone(z.id, { type: e.target.value })}
+                onChange={(e) => patch(z.id, { type: e.target.value })}
                 className="w-full px-2 py-1 rounded-lg border border-slate-200 bg-white outline-none focus:ring-2 focus:ring-amber-200"
               />
             </div>
@@ -642,7 +764,7 @@ function AdminTable({ zones, setSelectedId, updateZone, deleteZone, duplicateZon
               <input
                 type="checkbox"
                 checked={!!z.hasProject}
-                onChange={(e) => updateZone(z.id, { hasProject: e.target.checked })}
+                onChange={(e) => patch(z.id, { hasProject: e.target.checked })}
                 className="w-4 h-4 accent-amber-500"
               />
             </div>
@@ -650,10 +772,10 @@ function AdminTable({ zones, setSelectedId, updateZone, deleteZone, duplicateZon
             <div className="col-span-3 px-3 py-2">
               {z.shape === "rect" && z.rect ? (
                 <div className="grid grid-cols-4 gap-1">
-                  <RectTiny value={z.rect.x ?? 0} onChange={(v) => updateZone(z.id, { rect: { ...z.rect, x: v }, shape: "rect" })} />
-                  <RectTiny value={z.rect.y ?? 0} onChange={(v) => updateZone(z.id, { rect: { ...z.rect, y: v }, shape: "rect" })} />
-                  <RectTiny value={z.rect.w ?? 0} onChange={(v) => updateZone(z.id, { rect: { ...z.rect, w: v }, shape: "rect" })} />
-                  <RectTiny value={z.rect.h ?? 0} onChange={(v) => updateZone(z.id, { rect: { ...z.rect, h: v }, shape: "rect" })} />
+                  <RectTiny value={z.rect.x ?? 0} onChange={(v) => patchRect(z.id, { x: v })} />
+                  <RectTiny value={z.rect.y ?? 0} onChange={(v) => patchRect(z.id, { y: v })} />
+                  <RectTiny value={z.rect.w ?? 0} onChange={(v) => patchRect(z.id, { w: v })} />
+                  <RectTiny value={z.rect.h ?? 0} onChange={(v) => patchRect(z.id, { h: v })} />
                 </div>
               ) : (
                 <div className="text-xs text-slate-400">—</div>
@@ -662,7 +784,7 @@ function AdminTable({ zones, setSelectedId, updateZone, deleteZone, duplicateZon
 
             <div className="col-span-1 px-3 py-2 flex justify-end gap-2">
               <button
-                onClick={() => duplicateZone(z.id)}
+                onClick={() => duplicateZone?.(z.id)}
                 className="p-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 transition"
                 title="Клонувати"
               >
@@ -670,7 +792,7 @@ function AdminTable({ zones, setSelectedId, updateZone, deleteZone, duplicateZon
               </button>
 
               <button
-                onClick={() => deleteZone(z.id)}
+                onClick={() => deleteZone?.(z.id)}
                 className="p-2 rounded-lg border border-rose-200 bg-rose-50 hover:bg-rose-100 transition text-rose-700"
                 title="Видалити"
               >
@@ -685,34 +807,25 @@ function AdminTable({ zones, setSelectedId, updateZone, deleteZone, duplicateZon
 }
 
 
-function AdminSettings({ settings, setSettings, resetData, isAdmin }) {
+function AdminSettings({ settings, saveSettingsNow, resetAllToDefaults }) {
   const [draft, setDraft] = useState(() => settings);
 
   useEffect(() => {
     setDraft(settings);
   }, [settings]);
 
-  const commitDebounced = useDebouncedCallback((next) => {
-    setSettings(next);
-  }, 300);
+  const isDirty =
+    JSON.stringify(draft) !== JSON.stringify(settings);
 
   const setField = (key, value) => {
-    setDraft((prev) => {
-      const next = { ...prev, [key]: value };
-      commitDebounced(next);
-      return next;
-    });
+    setDraft((prev) => ({ ...prev, [key]: value }));
   };
 
   const setStringField = (k, value) => {
-    setDraft((prev) => {
-      const next = {
-        ...prev,
-        strings: { ...DEFAULT_STRINGS, ...(prev.strings || {}), [k]: value },
-      };
-      commitDebounced(next);
-      return next;
-    });
+    setDraft((prev) => ({
+      ...prev,
+      strings: { ...DEFAULT_STRINGS, ...(prev.strings || {}), [k]: value },
+    }));
   };
 
   return (
@@ -720,7 +833,7 @@ function AdminSettings({ settings, setSettings, resetData, isAdmin }) {
       <div className="col-span-12 md:col-span-7">
         <div className="rounded-xl border border-slate-200 bg-white p-4">
           <div className="font-semibold">Налаштування проєкту</div>
-          <div className="text-xs text-slate-600 mt-1">Зберігається публічно для всіх.</div>
+          <div className="text-xs text-slate-600 mt-1">Зміни застосуються після натискання “Зберегти”.</div>
 
           <div className="mt-4 grid grid-cols-12 gap-2">
             <Field label="Назва проєкту" className="col-span-12">
@@ -747,6 +860,26 @@ function AdminSettings({ settings, setSettings, resetData, isAdmin }) {
               />
             </Field>
           </div>
+
+          <div className="mt-4 flex gap-2">
+            <PrimaryButton
+              onClick={() => saveSettingsNow?.(draft)}
+              disabled={!isDirty}
+              title="Зберегти налаштування"
+            >
+              <CheckCircle2 className="w-4 h-4" />
+              Зберегти
+            </PrimaryButton>
+
+            <SoftButton
+              onClick={() => setDraft(settings)}
+              disabled={!isDirty}
+              title="Скасувати зміни"
+            >
+              <Undo2 className="w-4 h-4" />
+              Скасувати
+            </SoftButton>
+          </div>
         </div>
       </div>
 
@@ -754,15 +887,15 @@ function AdminSettings({ settings, setSettings, resetData, isAdmin }) {
         <div className="rounded-xl border border-rose-200 bg-rose-50 p-4">
           <div className="font-semibold text-rose-800">Ризикована зона</div>
           <div className="text-xs text-rose-700 mt-1">
-            Скидання демонстраційних даних зон. Після цього всі поточні зміни буде втрачено.
+            Скидання всіх даних до заводських, без можливості повернення.
           </div>
 
           <button
-            onClick={resetData}
+            onClick={resetAllToDefaults}
             className="mt-4 px-3 py-2 rounded-xl border border-rose-200 bg-white hover:bg-rose-100 transition text-rose-800 flex items-center gap-2"
           >
             <AlertTriangle className="w-4 h-4" />
-            Скинути зони
+            Скинути дані
           </button>
         </div>
       </div>
@@ -786,11 +919,32 @@ function AdminSettings({ settings, setSettings, resetData, isAdmin }) {
               </React.Fragment>
             ))}
           </div>
+
+          <div className="mt-4 flex gap-2">
+            <PrimaryButton
+              onClick={() => saveSettingsNow?.(draft)}
+              disabled={!isDirty}
+              title="Зберегти налаштування"
+            >
+              <CheckCircle2 className="w-4 h-4" />
+              Зберегти
+            </PrimaryButton>
+
+            <SoftButton
+              onClick={() => setDraft(settings)}
+              disabled={!isDirty}
+              title="Скасувати зміни"
+            >
+              <Undo2 className="w-4 h-4" />
+              Скасувати
+            </SoftButton>
+          </div>
         </div>
       </div>
     </div>
   );
 }
+
 
 
 
@@ -815,6 +969,29 @@ export default function App() {
   })();
 }, []);
 
+
+async function resetAllToDefaults() {
+  if (!confirm("Скинути всі дані до заводських?")) return;
+
+  const nextZones = AUTO_ZONES;
+  const nextSettings = DEFAULT_SETTINGS;
+
+  setZones(nextZones);
+  setSettings(nextSettings);
+
+  try {
+    await setDoc(doc(db, "zones", "main"), { items: nextZones }, { merge: true });
+    await setDoc(doc(db, "settings", "main"), nextSettings, { merge: true });
+  } catch (e) {
+    console.error(e);
+    alert("Не вдалося зберегти.");
+  }
+  localStorage.setItem(LS_SETTINGS, JSON.stringify(DEFAULT_SETTINGS));
+  setSelectedId(null);
+  setModalOpen(false);
+}
+
+
 useEffect(() => {
   (async () => {
     const ref = doc(db, "settings", "main");
@@ -825,6 +1002,18 @@ useEffect(() => {
   })();
 }, []);
 
+async function saveSettingsNow(next) {
+  setSettings(next);
+  try {
+    await setDoc(doc(db, "settings", "main"), next, { merge: true });
+    localStorage.setItem(LS_SETTINGS, JSON.stringify(next));
+  } catch (e) {
+    console.error(e);
+    alert("Не вдалося зберегти налаштування.");
+  }
+}
+
+
 
 
 const hydratingRef = useRef(false);
@@ -833,14 +1022,7 @@ const zonesHydratingRef = useRef(false);
 const zonesHydratedRef = useRef(false);
 
 
-const saveZonesDebounced = useDebouncedCallback((items) => {
-  saveZonesToFirestore(items).catch(console.error);
-}, 300);
 
-useEffect(() => {
-  if (!isAdmin) return;
-  saveZonesDebounced(zones);
-}, [zones, isAdmin, saveZonesDebounced]);
 
 useEffect(() => {
   const ref = doc(db, "settings", "main");
@@ -858,13 +1040,7 @@ useEffect(() => {
   return () => unsub();
 }, []);
 
-useEffect(() => {
-  if (!isAdmin) return;
-  if (!settingsHydratedRef.current) return;
-  if (hydratingRef.current) return;
 
-  saveSettings(settings).catch(console.error);
-}, [isAdmin, settings]);
 
 
 
@@ -875,7 +1051,31 @@ useEffect(() => {
   if (!force && !isAdmin) return;
   const ref = doc(db, "zones", "main");
   await setDoc(ref, { items: nextZones }, { merge: true });
+
+
 }
+
+async function commitZones(nextZones) {
+  setZones(nextZones);
+  if (isAdmin) {
+    await saveZonesToFirestore(nextZones, true);
+  }
+}
+
+function onSaveSelectedZone(draftZone) {
+  const next = zones.map(z => (z.id === draftZone.id ? draftZone : z));
+  commitZones(next).catch(console.error);
+}
+
+function patchZone(id, patch) {
+  const next = zones.map((z) => (z.id === id ? { ...z, ...patch } : z));
+  commitZones(next).catch(console.error);
+}
+
+function saveAllZones(nextZones) {
+  commitZones(nextZones).catch(console.error);
+}
+
 
 
 useEffect(() => {
@@ -1101,14 +1301,9 @@ const filteredItems = useMemo(() => {
     setAdminPanel("details");
   }
 
-  function updateZone(id, patch) {
-  setZones((prev) =>
-    prev.map((z) => (z.id === id ? { ...z, ...patch } : z))
-  );
-}
+  
 
-
-  function createZoneTextOnly() {
+function createZoneTextOnly() {
   let n = 1;
   let id = `ZNEW${n}`;
   const setIds = new Set(zones.map((z) => z.id));
@@ -1130,14 +1325,16 @@ const filteredItems = useMemo(() => {
     project: { title: "", description: "", metrics: {} },
   };
 
-  setZones((prev) => [...prev, z]);
+  const next = [...zones, z];
+  commitZones(next).catch(console.error);
 
   setSelectedId(id);
   setModalOpen(true);
   return id;
 }
 
-  function duplicateZone(id) {
+
+function duplicateZone(id) {
   const orig = zones.find((z) => z.id === id);
   if (!orig) return;
 
@@ -1150,33 +1347,26 @@ const filteredItems = useMemo(() => {
   }
 
   const copy = { ...orig, id: newId, name: `${orig.name} (copy)` };
-  setZones((prev) => [...prev, copy]);
+  const next = [...zones, copy];
 
+  commitZones(next).catch(console.error);
   setSelectedId(newId);
+  setModalOpen(true);
 }
 
 
-
-  function deleteZone(id) {
+function deleteZone(id) {
   if (!confirm(`Видалити зону ${id}?`)) return;
 
-  setZones((prev) => prev.filter((z) => z.id !== id));
+  const next = zones.filter((z) => z.id !== id);
+  commitZones(next).catch(console.error);
 
   if (selectedId === id) {
     setSelectedId(null);
     setModalOpen(false);
   }
 }
-
-  function updateZoneParam(id, key, value) {
-  setZones((prev) =>
-    prev.map((z) => {
-      if (z.id !== id) return z;
-      const params = { ...(z.params || {}), [key]: value };
-      return { ...z, params };
-    })
-  );
-}
+  
 
   function deleteZoneParam(id, key) {
   setZones((prev) =>
@@ -1277,15 +1467,6 @@ const filteredItems = useMemo(() => {
     }
   }
 
-  function resetData() {
-    if (!confirm("Скинути всі дані зон? Поточні зміни буде втрачено.")) return;
-    setZones(AUTO_ZONES);
-    saveZonesToFirestore(AUTO_ZONES, true);
-    setSelectedId(null);
-    setModalOpen(false);
-  }
-
-
   const VIEW_W = 1280;
   const VIEW_H = 844;
   function rectToSvg(r) {
@@ -1300,6 +1481,13 @@ const filteredItems = useMemo(() => {
 
 
 
+const cal = useMemo(() => {
+  return mapMode === "base"
+    ? MAP_CAL.base
+    : mapMode === "project"
+    ? MAP_CAL.project
+    : MAP_CAL.eng;
+}, [mapMode]);
 
 
 
@@ -1424,13 +1612,13 @@ const filteredItems = useMemo(() => {
       : "Інженерна схема"}
   </SoftButton>
 </div>
-
+        
 
 
         <div className="px-5 py-5">
           <div className="grid grid-cols-12 gap-4">
 
-            <div className="col-span-12 lg:col-span-3">
+            <div className="col-span-12 lg:col-span-3 order-2 md:order-1">
               <Card className="p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div>
@@ -1586,7 +1774,7 @@ const filteredItems = useMemo(() => {
               </div>
             </div>
 
-            <div className="col-span-12 lg:col-span-9">
+            <div className="col-span-12 lg:col-span-9 order-1 md:order-2">
               <Card className="p-3">
   <div className="flex items-center justify-between px-2 pb-3">
     <div>
@@ -1620,47 +1808,28 @@ const filteredItems = useMemo(() => {
       Завантаження карти…
     </div>
   </div>
+
+  
 )}
+
 
       <svg
   ref={svgRef}
   className="absolute inset-0"
   viewBox={`0 0 ${VIEW.w} ${VIEW.h}`}
-  preserveAspectRatio="xMidYMid meet"
+  preserveAspectRatio="none"
   style={{ width: "100%", height: "100%" }}
 >
-  {/* карта внутри SVG */}
-  {mapMode === "base" ? (
-    <image
-      href={baseMap}
-      x="0"
-      y="0"
-      width={VIEW.w}
-      height={VIEW.h}
-      preserveAspectRatio="xMidYMid meet"
-      style={{ pointerEvents: "none" }}
-    />
-  ) : mapMode === "project" ? (
-    <image
-      href={projectMap}
-      x="0"
-      y="0"
-      width={VIEW.w}
-      height={VIEW.h}
-      preserveAspectRatio="xMidYMid meet"
-      style={{ pointerEvents: "none" }}
-    />
-  ) : (
-    <image
-      href={engMap}
-      x="0"
-      y="0"
-      width={VIEW.w}
-      height={VIEW.h}
-      preserveAspectRatio="xMidYMid meet"
-      style={{ pointerEvents: "none" }}
-    />
-  )}
+  <image
+  href={mapMode === "base" ? baseMap : mapMode === "project" ? projectMap : engMap}
+  x={cal.x}
+  y={cal.y}
+  width={VIEW.w * cal.s}
+  height={VIEW.h * cal.s}
+  preserveAspectRatio="none"
+  style={{ pointerEvents: "none" }}
+/>
+
         {activeItems.map((z) => {
           if (onlyProjectContours && !z.hasProject && !isAdmin) return null;
           const isLine = z.shape === "line";
@@ -1811,32 +1980,32 @@ return (
                       {adminPanel === "details" ? (
                         <AdminDetails
                           selected={selected}
-                          mapMode={mapMode}
+                          onSaveSelected={onSaveSelectedZone}
                           createZone={createZoneTextOnly}
                           duplicateZone={duplicateZone}
                           deleteZone={deleteZone}
-                          updateZone={updateZone}
-                          updateZoneParam={updateZoneParam}
-                          deleteZoneParam={deleteZoneParam}
-                          ensureProject={ensureProject}
-                          removeProject={removeProject}
-                          updateProjectMetric={updateProjectMetric}
-                          deleteProjectMetric={deleteProjectMetric}
                         />
+
                       ) : null}
 
                       {adminPanel === "table" ? (
                         <AdminTable
                           zones={zones}
-                          setSelectedId={setSelectedId}
-                          updateZone={updateZone}
+                          onSelect={setSelectedId}
+                          onSaveAll={saveAllZones}
                           deleteZone={deleteZone}
                           duplicateZone={duplicateZone}
                         />
+
                       ) : null}
 
                       {adminPanel === "settings" ? (
-                       <AdminSettings settings={settings} setSettings={setSettings} resetData={resetData} isAdmin={isAdmin} />
+                       <AdminSettings
+                          settings={settings}
+                          saveSettingsNow={saveSettingsNow}
+                          resetAllToDefaults={resetAllToDefaults}
+                        />
+
                       ) : null}
                     </div>
                   </Card>
