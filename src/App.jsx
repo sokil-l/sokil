@@ -1618,7 +1618,7 @@ const cal = useMemo(() => {
         <div className="px-5 py-5">
           <div className="grid grid-cols-12 gap-4">
 
-            <div className="col-span-12 lg:col-span-3 order-2 md:order-1">
+              <div className="col-span-12 lg:col-span-3 order-2 lg:order-1">
               <Card className="p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div>
@@ -1774,7 +1774,7 @@ const cal = useMemo(() => {
               </div>
             </div>
 
-            <div className="col-span-12 lg:col-span-9 order-1 md:order-2">
+            <div className="col-span-12 lg:col-span-9 order-1 lg:order-2">
               <Card className="p-3">
   <div className="flex items-center justify-between px-2 pb-3">
     <div>
