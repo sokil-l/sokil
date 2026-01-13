@@ -1831,6 +1831,7 @@ const cal = useMemo(() => {
 />
 
         {activeItems.map((z) => {
+          if (mapMode == "base") return null;
           if (onlyProjectContours && !z.hasProject && !isAdmin) return null;
           const isLine = z.shape === "line";
           const isPath = z.shape === "path";
